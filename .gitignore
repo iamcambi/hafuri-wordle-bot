@@ -1,4 +1,6 @@
 node_modules/
 .env
 data/stats.json
+data/daily.json
+data/*.tmp
 *.log

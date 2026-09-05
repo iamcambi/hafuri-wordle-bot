@@ -1,22 +1,48 @@
 # Hafuri Wordle Bot
 
-A self-hosted Wordle game bot for the **hafuri lofi** Fluxer community, scoped
-to the **#puzzles** channel. Built on [`@fluxerjs/core`](https://fluxerjs.blstmo.com).
+A self-hosted, multiplayer daily Wordle bot for the **hafuri lofi** Fluxer
+community, scoped to the **#puzzles** channel. Built on
+[`@fluxerjs/core`](https://fluxerjs.blstmo.com).
 
-## What it does
+## How it works
 
-- `!wordle` — starts a new game for you in #puzzles (one active game per player)
-- Type any 5-letter word in #puzzles while a game is running — it's treated as a guess
-- `!wordle end` — gives up and reveals the answer
-- `!wordle stats` — shows your played/won/streak record
+Everyone in the server guesses the **same secret 5-letter word each day** —
+just like real-world daily Wordle. The word changes once a day at midnight
+(configurable timezone, default `America/New_York`), and each player gets one
+attempt at it — 6 tries, tracked independently per player.
+
+- `!wordle` — start (or resume) today's word
+- Type any 5-letter word in #puzzles while your game is running — it's your guess
+- `!wordle end` — give up on today's word
+- `!wordle stats` — your all-time played/won/streak record
+- `!wordle leaderboard` (or `!wordle today`) — who has finished today's word so far, and in how many guesses
 - `!wordle help` — shows the command list in-channel
 - 🟩 / 🟨 / ⬛ tile feedback, exactly like the original Wordle
-- Per-user stats (played, won, current streak, best streak, guess distribution)
-  persist to `data/stats.json` across restarts
+
+### Guesses are hidden from other players
+
+Typing a 5-letter word is the only way to guess, but nobody else in the
+channel can see what you typed or what the secret word is:
+
+- Your guess message is **deleted immediately** after the bot reads it
+  (requires the bot to hold the **Manage Messages** permission in #puzzles).
+- The bot's reply only ever shows the **colored tile squares** — never the
+  letters, and never the actual answer, even when you win, lose, or give up.
+  This keeps the puzzle spoiler-free for everyone else who hasn't finished
+  today's word yet.
+- The public channel only ever announces *that* someone solved it and in how
+  many guesses (e.g. "🎉 hafuri solved today's word in 2/6!") — never the word
+  itself.
+
+Per-user stats (played, won, current streak, best streak, guess distribution)
+persist to `data/stats.json` across restarts. Today's shared word and each
+player's in-progress attempts persist to `data/daily.json` (kept for the last
+14 days, then pruned).
 
 The bot only reads/reacts to messages in the configured #puzzles channel — it
-ignores every other channel and never needs elevated permissions (it holds
-only View Channel + Send Messages + Read Message History on the Fluxer side).
+ignores every other channel. It holds View Channel, Send Messages, Read
+Message History, and Manage Messages on the Fluxer side (the last one is
+needed solely to delete players' raw guess messages).
 
 ## Requirements
 
@@ -58,8 +84,8 @@ only View Channel + Send Messages + Read Message History on the Fluxer side).
    docker compose up -d --build
    ```
 
-   `./data` is mounted as a volume, so `stats.json` survives rebuilds and
-   restarts.
+   `./data` is mounted as a volume, so `stats.json` and `daily.json` survive
+   rebuilds and restarts.
 
 5. To stop it:
 
@@ -86,10 +112,21 @@ Make sure whichever `node` is on your `PATH` is >= 22.13.0 — check with
 | `FLUXER_APPLICATION_ID` | Wordle_Bot's application ID |
 | `FLUXER_API_URL` | Instance discovery origin, e.g. `https://api.canary.fluxer.app` |
 | `PUZZLES_CHANNEL_ID` | Channel ID the bot watches (hafuri lofi's #puzzles) |
+| `ANSWER_TIMEZONE` | Optional. IANA timezone used to compute "today" for the shared daily word (default `America/New_York`). |
 | `HEALTH_PORT` | Optional. Port for a plain HTTP health endpoint (`200` once logged in, `503` before). Used by the Docker healthcheck. Leave unset to disable it. |
 
 **Never commit `.env`** — it holds a live bot token. `.gitignore` already
 excludes it.
+
+## Required bot permission: Manage Messages
+
+Because the bot deletes each player's raw guess message to keep it hidden
+from everyone else, its role in the server needs the **Manage Messages**
+permission (in addition to View Channel, Send Messages, and Read Message
+History). If this permission is ever removed, guesses will still work
+correctly, but the raw guess text will stay visible in the channel until
+someone manually deletes it — the bot logs a warning in that case instead of
+failing the command.
 
 ## Notes on the Fluxer API
 
@@ -106,13 +143,16 @@ discovery format.
 
 ```
 src/
-  index.js   — bot entry point, command handling, health server
-  game.js    — per-channel/user in-memory game state
-  wordle.js  — guess evaluation + tile rendering
-  words.js   — answer/valid-guess word lists
-  stats.js   — persistent per-user stats (data/stats.json)
+  index.js     — bot entry point, command handling, health server
+  daily.js     — deterministic date-seeded shared daily word
+  dailyStore.js — persistent per-day per-user progress (data/daily.json)
+  game.js      — DailyGameManager: shared-word game logic
+  wordle.js    — guess evaluation + tile rendering
+  words.js     — answer/valid-guess word lists
+  stats.js     — persistent per-user all-time stats (data/stats.json)
 data/
   answers.txt   — possible secret words
   guesses.txt   — additional accepted guesses
-  stats.json    — per-user stats (created/updated at runtime)
+  stats.json    — per-user all-time stats (created/updated at runtime)
+  daily.json    — today's (and the last 14 days') shared word + player progress (created/updated at runtime)
 ```
