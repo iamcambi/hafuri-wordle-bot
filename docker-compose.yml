@@ -1,0 +1,16 @@
+services:
+  wordle-bot:
+    build: .
+    container_name: hafuri-wordle-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # Persists data/stats.json (per-user played/won/streak counters)
+      # across container restarts, rebuilds, and image updates.
+      - ./data:/app/data
+    ports:
+      # Only needed if you want to check bot health from the host
+      # (e.g. curl http://<host>:8091). Safe to remove this block
+      # entirely if you don't need outside access to the health check.
+      - "8091:8091"

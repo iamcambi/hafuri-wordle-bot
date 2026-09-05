@@ -1,0 +1,18 @@
+{
+  "name": "hafuri-wordle-bot",
+  "version": "1.0.0",
+  "description": "Self-hosted Wordle game bot for the hafuri lofi Fluxer community, scoped to #puzzles.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@fluxerjs/core": "^2.2.0",
+    "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}
