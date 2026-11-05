@@ -37,6 +37,26 @@ function epochDayNumber(dateKey) {
 }
 
 /**
+ * Sequential day number for a date key (used for streak math in stats.js).
+ */
+export function dayNumber(dateKey) {
+  return epochDayNumber(dateKey);
+}
+
+// Wordle #1 was June 19, 2021 — keep the same numbering as the NYT app so
+// daily puzzle numbers feel familiar.
+const WORDLE_EPOCH_MS = Date.UTC(2021, 5, 19);
+
+/**
+ * The NYT-style daily puzzle number (Wordle #1,234 ...) for a date key.
+ */
+export function puzzleNumber(dateKey) {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  const ms = Date.UTC(y, m - 1, d);
+  return Math.floor((ms - WORDLE_EPOCH_MS) / DAY_MS) + 1;
+}
+
+/**
  * Deterministic answer for a given date key. Same word for every player,
  * every process, every restart -- as long as data/answers.txt doesn't
  * change -- so the puzzle is genuinely shared across the whole server.

@@ -13,11 +13,21 @@ attempt at it — 6 tries, tracked independently per player.
 
 - `!wordle` — start (or resume) today's word
 - Type any 5-letter word in #puzzles while your game is running — it's your guess
-- `!wordle end` — give up on today's word
-- `!wordle stats` — your all-time played/won/streak record
+- `!wordle end` — give up on today's word (the answer is DM'd to you)
+- `!wordle hard` — toggle hard mode (revealed hints must be reused, like the NYT app)
+- `!wordle stats` — your all-time record, streak, and guess distribution (sent via DM)
 - `!wordle leaderboard` (or `!wordle today`) — who has finished today's word so far, and in how many guesses
+- `!wordle answer` — DM today's answer (only after you've finished today's puzzle)
 - `!wordle help` — shows the command list in-channel
 - 🟩 / 🟨 / ⬛ tile feedback, exactly like the original Wordle
+- Every guess reply shows your **full board so far** plus a **letter keyboard**
+  with each letter's best-known state (🟩/🟨/⬛), like the NYT on-screen keyboard
+- Daily puzzles are numbered with the same numbering as the NYT app
+  (e.g. "Wordle #1,966")
+- When you finish (win, lose, or give up), the bot **DMs you the answer**
+  together with a spoiler-free share text (`Wordle #1,966 4/6*` + your grid)
+- Streaks follow the NYT rule: winning on consecutive days builds a streak;
+  skipping a day resets it
 
 ### Guesses are hidden from other players
 
@@ -26,12 +36,16 @@ channel can see what you typed or what the secret word is:
 
 - Your guess message is **deleted immediately** after the bot reads it
   (requires the bot to hold the **Manage Messages** permission in #puzzles).
-- The bot's reply only ever shows the **colored tile squares** — never the
+- The bot's public reply only ever shows the **colored tile squares** — never the
   letters, and never the actual answer, even when you win, lose, or give up.
   This keeps the puzzle spoiler-free for everyone else who hasn't finished
   today's word yet.
+- The answer itself is only ever sent to the finishing player **via DM**,
+  never in the channel. If a DM can't be delivered (DMs from server members
+  disabled), the bot says so in-channel and offers `!wordle answer` as a
+  retry.
 - The public channel only ever announces *that* someone solved it and in how
-  many guesses (e.g. "🎉 hafuri solved today's word in 2/6!") — never the word
+  many guesses (e.g. "🎉 hafuri solved Wordle #1,966 in 2/6!") — never the word
   itself.
 
 Per-user stats (played, won, current streak, best streak, guess distribution)
@@ -144,12 +158,15 @@ discovery format.
 ```
 src/
   index.js     — bot entry point, command handling, health server
-  daily.js     — deterministic date-seeded shared daily word
+  daily.js     — deterministic date-seeded shared daily word + puzzle numbering
   dailyStore.js — persistent per-day per-user progress (data/daily.json)
-  game.js      — DailyGameManager: shared-word game logic
-  wordle.js    — guess evaluation + tile rendering
+  game.js      — DailyGameManager: shared-word game logic + hard mode
+  wordle.js    — guess evaluation, board/keyboard rendering, share text
   words.js     — answer/valid-guess word lists
   stats.js     — persistent per-user all-time stats (data/stats.json)
+test/
+  logic.test.mjs    — game-engine unit tests (node test/logic.test.mjs)
+  handler.test.mjs  — end-to-end command/guess flow tests, no live bot needed
 data/
   answers.txt   — possible secret words
   guesses.txt   — additional accepted guesses

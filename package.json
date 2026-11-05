@@ -5,7 +5,8 @@
   "type": "module",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "test": "node test/logic.test.mjs && node test/handler.test.mjs"
   },
   "license": "MIT",
   "dependencies": {

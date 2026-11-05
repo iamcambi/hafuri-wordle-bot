@@ -1,6 +1,7 @@
-import { evaluateGuess, WORD_LENGTH, MAX_ATTEMPTS } from './wordle.js';
+import { evaluateGuess, WORD_LENGTH, MAX_ATTEMPTS, hardModeIssues } from './wordle.js';
 import { VALID_GUESSES } from './words.js';
 import { getTodayKey, getDailyAnswer } from './daily.js';
+import { getHardMode } from './stats.js';
 import { getPlayerEntry, savePlayerEntry, getLeaderboard } from './dailyStore.js';
 
 /**
@@ -10,6 +11,9 @@ import { getPlayerEntry, savePlayerEntry, getLeaderboard } from './dailyStore.js
  * player's own attempts against that shared word, and persists them to
  * disk (dailyStore.js) so progress survives bot restarts and a player
  * can't get a fresh word by re-running `!wordle`.
+ *
+ * Each day's entry also snapshots the player's hard-mode preference at
+ * start time (like the NYT app, hard mode can't change mid-puzzle).
  */
 export class DailyGameManager {
   todayKey() {
@@ -31,6 +35,7 @@ export class DailyGameManager {
       answer: getDailyAnswer(dateKey),
       attempts: [],
       status: 'playing', // 'playing' | 'won' | 'lost' | 'gaveup'
+      hardMode: getHardMode(userId),
       startedAt: Date.now(),
       completedAt: null,
     };
@@ -51,8 +56,12 @@ export class DailyGameManager {
 
   /**
    * Submit a guess against today's shared word.
-   * Returns { status: 'no-game' | 'already-done' | 'invalid-word', entry? }
+   * Returns { status: 'no-game' | 'already-done' | 'invalid-word' | 'hard-mode', issues?, entry? }
    *      or { status: 'win' | 'lose' | 'continue', entry, word, result }
+   *
+   * Hard mode (NYT-style): once a guess has revealed hints, every later
+   * guess must reuse them — greens in the same position, yellows included
+   * somewhere in the word.
    */
   guess(userId, rawWord) {
     const dateKey = this.todayKey();
@@ -63,6 +72,11 @@ export class DailyGameManager {
     const word = rawWord.toLowerCase();
     if (word.length !== WORD_LENGTH || !VALID_GUESSES.has(word)) {
       return { status: 'invalid-word' };
+    }
+
+    if (entry.hardMode && entry.attempts.length > 0) {
+      const issues = hardModeIssues(entry.attempts, word);
+      if (issues.length) return { status: 'hard-mode', issues, entry };
     }
 
     const result = evaluateGuess(word, entry.answer);

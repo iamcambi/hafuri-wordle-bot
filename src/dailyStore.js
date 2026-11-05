@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -33,10 +33,11 @@ function persist() {
   if (keys.length > RETAIN_DAYS) {
     for (const k of keys.slice(0, keys.length - RETAIN_DAYS)) delete store[k];
   }
-  // Write to a temp file then rename, so a crash mid-write can't corrupt daily.json.
+  // Write to a temp file then atomically rename, so a crash mid-write
+  // can't corrupt daily.json.
   const tmpPath = `${STORE_PATH}.tmp`;
   writeFileSync(tmpPath, JSON.stringify(store, null, 2));
-  writeFileSync(STORE_PATH, readFileSync(tmpPath));
+  renameSync(tmpPath, STORE_PATH);
 }
 
 function getDay(dateKey) {
