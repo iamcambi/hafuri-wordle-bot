@@ -13,4 +13,9 @@ services:
       # Only needed if you want to check bot health from the host
       # (e.g. curl http://<host>:8091). Safe to remove this block
       # entirely if you don't need outside access to the health check.
-      - "8091:8091"
+      - "127.0.0.1:8091:8091"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

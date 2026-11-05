@@ -11,6 +11,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 COPY src ./src
+COPY data/answers.txt data/guesses.txt ./data/
 
 # Persisted stats live under /app/data — mount a host volume here (see
 # docker-compose.yml) so wins/streaks survive container restarts/updates.
