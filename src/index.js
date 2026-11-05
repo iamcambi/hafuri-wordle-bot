@@ -85,14 +85,14 @@ async function sendResultDM(user, entry) {
   const no = todayPuzzleNo();
   const text =
     `**Today's word was \`${entry.answer.toUpperCase()}\`** — Wordle #${no.toLocaleString()}\n` +
-    `\n${renderBoard(entry)}\n` +
+    `\n${renderBoard(entry)}\n\n${renderKeyboard(entry.attempts)}\n` +
     `\n${entry.status === 'won' ? `Solved in ${entry.attempts.length}/${MAX_ATTEMPTS}${entry.hardMode ? ' (hard mode)' : ''}` : entry.status === 'gaveup' ? 'Gave up' : 'Out of guesses'}\n` +
     `\nShare your result (spoiler-free):\n\`\`\`\nWordle #${no.toLocaleString()} ${shareScore(entry)}\n${shareGrid(entry.attempts)}\n\`\`\``;
   return dm(user, text);
 }
 
 function boardWithKeyboard(entry) {
-  return `${renderBoard(entry)}\n${renderKeyboard(entry.attempts)}`;
+  return `**Your guesses**\n${renderBoard(entry)}\n\n${renderKeyboard(entry.attempts)}`;
 }
 
 /**
@@ -285,7 +285,7 @@ export async function handleMessage(message, games) {
       const s = recordResult(userId, true, entry.attempts.length);
       const dmOk = await sendResultDM(message.author, entry);
       await message.send(
-        `${renderBoard(entry)}\n${renderKeyboard(entry.attempts)}\n\n🎉 ${username} solved Wordle #${no} in ${entry.attempts.length}/${MAX_ATTEMPTS}${entry.hardMode ? '*' : ''}! ` +
+        `${renderBoard(entry)}\n\n🎉 ${username} solved Wordle #${no} in ${entry.attempts.length}/${MAX_ATTEMPTS}${entry.hardMode ? '*' : ''}! ` +
           `Current streak: ${s.currentStreak} · \`${dmOk ? "answer DM'd" : 'DM failed'}\` · \`!wordle leaderboard\` for today's standings.`
       );
       return;
@@ -295,14 +295,14 @@ export async function handleMessage(message, games) {
       recordResult(userId, false, entry.attempts.length);
       const dmOk = await sendResultDM(message.author, entry);
       await message.send(
-        `${renderBoard(entry)}\n${renderKeyboard(entry.attempts)}\n\n${username} is out of guesses on Wordle #${no}. ` +
+        `${renderBoard(entry)}\n\n${username} is out of guesses on Wordle #${no}. ` +
           `${dmOk ? 'The answer is in your DMs.' : "I couldn't DM you the answer — enable DMs from server members, then run `!wordle answer`."} Try again tomorrow!`
       );
       return;
     }
 
     await message.send(
-      `${renderBoard(entry)}\n${renderKeyboard(entry.attempts)}\n${MAX_ATTEMPTS - entry.attempts.length} guess(es) left.`
+      `${boardWithKeyboard(entry)}\n\n${MAX_ATTEMPTS - entry.attempts.length} guess(es) left.`
     );
   } catch (err) {
     console.error('Error handling message:', err);

@@ -51,11 +51,26 @@ const kb = w.renderKeyboard([
   { word: 'crane', result: ['correct', 'present', 'absent', 'absent', 'absent'] },
   { word: 'slate', result: ['absent', 'absent', 'present', 'absent', 'correct'] },
 ]);
-check('keyboard renders 3 QWERTY rows', kb.split('\n').length === 3);
-check('keyboard marks green letters', kb.includes('🟩'));
-check('keyboard marks yellow letters', kb.includes('🟨'));
-check('keyboard marks gray letters', kb.includes('⬛'));
-check('keyboard keeps unknown letters as text', kb.includes('Q'));
+check('letter hints have explicit categories', kb.includes('Your letter hints') && kb.includes('Not tried:'));
+check('green hints show letters in confirmed positions', kb.includes('🟩 Right spot: `C _ _ _ E`'));
+check('yellow hints name letters in the word', kb.includes('🟨 In word, wrong spot: `A R`'));
+check('gray hints name ruled-out letters', kb.includes('⬛ Not in word: `L N S T`'));
+check('unused letters stay visible', kb.includes('Not tried: `B D F G H I J K M O P Q U V W X Y Z`'));
+check('full guessed words stay out of public hints', !kb.includes('CRANE') && !kb.includes('SLATE'));
+const duplicateHints = w.renderKeyboard([
+  { word: 'geese', result: w.evaluateGuess('geese', 'stone') },
+]);
+check('gray duplicate never overrides a confirmed letter', duplicateHints.includes('Right spot: `_ _ _ _ E`') && duplicateHints.includes('Not in word: `G`'));
+check('a green letter is not also listed as yellow', duplicateHints.includes('In word, wrong spot: `S`'));
+const retainedHints = w.renderKeyboard([
+  { word: 'crane', result: w.evaluateGuess('crane', 'crone') },
+  { word: 'tails', result: w.evaluateGuess('tails', 'crone') },
+]);
+check('confirmed positions survive later guesses', retainedHints.includes('Right spot: `C R _ N E`'));
+const emptyHints = w.renderKeyboard([]);
+check('empty hints have five unknown positions', emptyHints.includes('Right spot: `_ _ _ _ _`'));
+check('empty categories are explained', emptyHints.includes('wrong spot: `none yet`') && emptyHints.includes('Not in word: `none yet`'));
+check('empty keyboard lists all 26 unused letters', emptyHints.includes('Not tried: `A B C D E F G H I J K L M N O P Q R S T U V W X Y Z`'));
 
 // --- hard mode ---
 s.setHardMode('carol', true);

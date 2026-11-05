@@ -55,31 +55,37 @@ export function renderBoard(entry) {
   return entry.attempts.map((a) => renderTiles(a.result)).join('\n');
 }
 
-// QWERTY layout, same as the NYT on-screen keyboard. Letters the player has
-// learned something about are replaced by their best-known tile color, so
-// the row position itself identifies the letter.
-const KEYBOARD_ROWS = ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
+const ALPHABET = 'abcdefghijklmnopqrstuvwxyz';
 const STATE_RANK = { absent: 1, present: 2, correct: 3 };
 
 /**
- * Render the letter keyboard, NYT-style: each letter shows the best state
- * discovered across all guesses so far (🟩 > 🟨 > ⬛). Unguessed letters
- * show as plain letters.
+ * Name the letters instead of replacing them with anonymous colored squares.
+ * Keep the strongest evidence for each letter, especially for duplicate guesses.
+ * Only show information learned from guesses, never inspect the answer.
+ * Full guessed words remain out of the public board.
  */
 export function renderKeyboard(attempts) {
   const state = {};
+  const positions = Array(WORD_LENGTH).fill('_');
   for (const a of attempts) {
     a.result.forEach((r, i) => {
-      const ch = a.word[i];
+      const ch = a.word[i].toLowerCase();
       if (!state[ch] || STATE_RANK[r] > STATE_RANK[state[ch]]) state[ch] = r;
+      if (r === 'correct') positions[i] = ch.toUpperCase();
     });
   }
-  return KEYBOARD_ROWS.map((row) =>
-    row
-      .split('')
-      .map((ch) => (state[ch] ? TILE[state[ch]] : ch.toUpperCase()))
-      .join(' ')
-  ).join('\n');
+  const letters = (status) =>
+    [...ALPHABET]
+      .filter((ch) => status === 'unused' ? !state[ch] : state[ch] === status)
+      .map((ch) => ch.toUpperCase())
+      .join(' ') || (status === 'unused' ? 'none' : 'none yet');
+  return [
+    '**Your letter hints**',
+    `🟩 Right spot: \`${positions.join(' ')}\` (1–5)`,
+    `🟨 In word, wrong spot: \`${letters('present')}\``,
+    `⬛ Not in word: \`${letters('absent')}\``,
+    `Not tried: \`${letters('unused')}\``,
+  ].join('\n');
 }
 
 /**

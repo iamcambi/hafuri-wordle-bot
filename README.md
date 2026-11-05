@@ -20,8 +20,10 @@ attempt at it — 6 tries, tracked independently per player.
 - `!wordle answer` — DM today's answer (only after you've finished today's puzzle)
 - `!wordle help` — shows the command list in-channel
 - 🟩 / 🟨 / ⬛ tile feedback, exactly like the original Wordle
-- Every guess reply shows your **full board so far** plus a **letter keyboard**
-  with each letter's best-known state (🟩/🟨/⬛), like the NYT on-screen keyboard
+- Each in-progress reply shows your **full board so far** and **named letter hints**:
+  confirmed letters in a five-position pattern, letters in the word but in the
+  wrong spot, ruled-out letters, and letters not yet tried. Letters never
+  disappear behind anonymous colored keyboard squares.
 - Daily puzzles are numbered with the same numbering as the NYT app
   (e.g. "Wordle #1,966")
 - When you finish (win, lose, or give up), the bot **DMs you the answer**
@@ -32,14 +34,16 @@ attempt at it — 6 tries, tracked independently per player.
 ### Guesses are hidden from other players
 
 Typing a 5-letter word is the only way to guess, but nobody else in the
-channel can see what you typed or what the secret word is:
+channel sees your complete guess messages after the bot removes them:
 
 - Your guess message is **deleted immediately** after the bot reads it
   (requires the bot to hold the **Manage Messages** permission in #puzzles).
-- The bot's public reply only ever shows the **colored tile squares** — never the
-  letters, and never the actual answer, even when you win, lose, or give up.
-  This keeps the puzzle spoiler-free for everyone else who hasn't finished
-  today's word yet.
+- The board uses **colored tile squares**, not complete guessed words. During
+  play, the named letter hints are visible in the shared channel; other players
+  can see these clues. This is not a fully private or spoiler-free play mode.
+- Once you win or run out of guesses, letter hints move into the result DM.
+  The public completion message omits the letter-position pattern so it does
+  not spell out a winning answer.
 - The answer itself is only ever sent to the finishing player **via DM**,
   never in the channel. If a DM can't be delivered (DMs from server members
   disabled), the bot says so in-channel and offers `!wordle answer` as a

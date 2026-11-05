@@ -62,6 +62,9 @@ for (const gw of validGuesses) {
   if (gw === answer) break;
   m = makeMessage('u1', gw);
   await handleMessage(m, games);
+  if (games.get('u1').status === 'playing') {
+    check('in-progress reply names every letter category', m._state.sends.some((t) => t.includes('Your letter hints') && t.includes('Right spot:') && t.includes('In word, wrong spot:') && t.includes('Not in word:') && t.includes('Not tried:')));
+  }
 }
 if (validGuesses.includes(answer)) {
   m = makeMessage('u1', answer);
@@ -75,7 +78,8 @@ if (games.get('u1').status === 'playing') {
 winState = m._state;
 check('win announced publicly', winState.sends.some((t) => t.includes('solved Wordle #')));
 check('win reply shows full board (multiple tile rows)', winState.sends.some((t) => t.split('🟩').length > 2 || (t.match(/^[🟩🟨⬛]{5}/m) && t.split('\n').length > 3)));
-check('win reply includes keyboard', winState.sends.some((t) => /^([A-Z🟩🟨⬛] )+[A-Z🟩🟨⬛]$/m.test(t)));
+check('finished letter hints go privately with the result', winState.dms.some((t) => t.includes('Your letter hints') && t.includes('Right spot:') && t.includes('In word, wrong spot:') && t.includes('Not in word:') && t.includes('Not tried:')));
+check('public win does not spell the answer through the position pattern', winState.sends.every((t) => !t.includes('Right spot:') && !t.includes(answer.toUpperCase().split('').join(' '))));
 check('win DM contains the answer', winState.dms.some((t) => t.includes(answer.toUpperCase())));
 check('win DM has spoiler-free share text', winState.dms.some((t) => t.includes('Wordle #') && t.includes('/6')));
 check('win recorded in stats', getStats('u1').won === 1 && getStats('u1').played === 1);
