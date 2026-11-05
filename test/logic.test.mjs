@@ -60,6 +60,7 @@ const kb = w.renderKeyboard([
   { word: 'slate', result: ['absent', 'absent', 'present', 'absent', 'correct'] },
 ]);
 check('letter hints have explicit categories', kb.includes('Your letter hints') && kb.includes('Not tried:'));
+check('letter hint heading and categories have blank lines', kb.split('\n\n').length === 5 && kb.startsWith('**Your letter hints**\n\n'));
 check('green hints show letters in confirmed positions', kb.includes('🟩 Right spot: `C _ _ _ E`'));
 check('yellow hints name letters in the word', kb.includes('🟨 In word, wrong spot: `A R`'));
 check('gray hints name ruled-out letters', kb.includes('⬛ Not in word: `L N S T`'));

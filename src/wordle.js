@@ -93,7 +93,7 @@ export function renderKeyboard(attempts) {
     `🟨 In word, wrong spot: \`${letters('present')}\``,
     `⬛ Not in word: \`${letters('absent')}\``,
     `Not tried: \`${letters('unused')}\``,
-  ].join('\n');
+  ].join('\n\n');
 }
 
 /**

@@ -64,6 +64,7 @@ for (const gw of validGuesses) {
   await handleMessage(m, games);
   if (games.get('u1').status === 'playing') {
     check('in-progress reply names every letter category', m._state.sends.some((t) => t.includes('Your letter hints') && t.includes('Right spot:') && t.includes('In word, wrong spot:') && t.includes('Not in word:') && t.includes('Not tried:')));
+    check('guess heading is separated from the grid', m._state.sends.some((t) => t.includes('**Your guesses**\n\n`1`')));
   }
 }
 if (validGuesses.includes(answer)) {

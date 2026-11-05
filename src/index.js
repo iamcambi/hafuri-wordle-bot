@@ -92,7 +92,7 @@ async function sendResultDM(user, entry) {
 }
 
 function boardWithKeyboard(entry) {
-  return `**Your guesses**\n${renderBoard(entry)}\n\n${renderKeyboard(entry.attempts)}`;
+  return `**Your guesses**\n\n${renderBoard(entry)}\n\n${renderKeyboard(entry.attempts)}`;
 }
 
 /**
@@ -120,8 +120,8 @@ export async function handleMessage(message, games) {
           return;
         }
         await message.reply(
-          `You're already on today's word (${existing.attempts.length}/${MAX_ATTEMPTS} guesses used).\n` +
-            `${boardWithKeyboard(existing)}\n` +
+          `You're already on today's word (${existing.attempts.length}/${MAX_ATTEMPTS} guesses used).\n\n` +
+            `${boardWithKeyboard(existing)}\n\n` +
             'Type a 5-letter guess, or `!wordle end` to give up.'
         );
         return;
