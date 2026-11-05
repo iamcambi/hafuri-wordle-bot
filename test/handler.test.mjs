@@ -3,7 +3,9 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { prepareNytFixture } from './nyt-fixture.mjs';
 
+prepareNytFixture();
 process.env.STATS_FILE = join(mkdtempSync(join(tmpdir(), 'stats-')), 'stats.json');
 process.env.DAILY_FILE = join(mkdtempSync(join(tmpdir(), 'daily-')), 'daily.json');
 process.env.PUZZLES_CHANNEL_ID = 'chan-1';
@@ -15,6 +17,7 @@ const { getTodayKey } = await import('../src/daily.js');
 const { getStats } = await import('../src/stats.js');
 
 let failures = 0;
+const channelPayloads = [];
 function check(name, cond, extra) {
   if (!cond) { failures++; console.log('FAIL:', name, extra ?? ''); }
   else console.log('ok  :', name);
@@ -32,8 +35,8 @@ function makeMessage(userId, content) {
     },
     channelId: 'chan-1',
     content,
-    reply: async (t) => { state.replies.push(t); },
-    send: async (t) => { state.sends.push(t); },
+    reply: async (t) => { channelPayloads.push(t); state.replies.push(t.content); },
+    send: async (t) => { channelPayloads.push(t); state.sends.push(t.content); },
     delete: async () => { state.deleted++; },
     client: { users: { fetch: async (id) => ({ username: `user_${id}` }) } },
   };
@@ -47,6 +50,8 @@ const games = new DailyGameManager();
 let m = makeMessage('u1', '!wordle');
 await handleMessage(m, games);
 check('start announces puzzle number', m._state.replies[0].includes('#') && m._state.replies[0].includes('Daily puzzle'));
+check('start identifies the official NYT date', m._state.replies[0].includes('NYT') && m._state.replies[0].includes(getTodayKey()));
+check('game pins its source and calendar date', games.get('u1').source === 'nyt' && games.get('u1').dateKey === getTodayKey());
 
 // --- invalid guess ---
 m = makeMessage('u1', 'zzzzz');
@@ -167,6 +172,9 @@ check('bot messages ignored', botMsg._state.replies.length === 0);
 m = makeMessage('u8', 'crane');
 await handleMessage(m, games);
 check('unstarted guess ignored and left visible', m._state.sends.length === 0 && m._state.deleted === 0);
+
+check('all public bot replies suppress notifications', channelPayloads.length > 0 && channelPayloads.every((p) => p.flags === 4096));
+check('all public bot replies suppress every mention type', channelPayloads.every((p) => p.allowedMentions.parse.length === 0 && p.allowedMentions.users.length === 0 && p.allowedMentions.roles.length === 0 && p.allowedMentions.repliedUser === false && p.ping === false && p.tts === false));
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

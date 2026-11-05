@@ -2,7 +2,9 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { prepareNytFixture } from './nyt-fixture.mjs';
 
+prepareNytFixture();
 process.env.STATS_FILE = join(mkdtempSync(join(tmpdir(), 'stats-')), 'stats.json');
 process.env.DAILY_FILE = join(mkdtempSync(join(tmpdir(), 'daily-')), 'daily.json');
 
@@ -28,9 +30,11 @@ check('triple e vs double e (eeeee/beech)', ev('eeeee', 'beech') === 'absent,cor
 // --- daily determinism + puzzle numbering ---
 const a1 = d.getDailyAnswer('2026-11-05');
 check('daily answer deterministic', a1 === d.getDailyAnswer('2026-11-05') && /^[a-z]{5}$/.test(a1));
-check('puzzle #1 is 2021-06-19', d.puzzleNumber('2021-06-19') === 1);
-check('puzzle #2 is 2021-06-20', d.puzzleNumber('2021-06-20') === 2);
-check('puzzle number matches NYT (2026-11-05 = #1966)', d.puzzleNumber('2026-11-05') === 1966);
+check('puzzle #0 is 2021-06-19', d.puzzleNumber('2021-06-19') === 0);
+check('puzzle #1 is 2021-06-20', d.puzzleNumber('2021-06-20') === 1);
+check('puzzle number matches NYT (2026-11-05 = #1965)', d.puzzleNumber('2026-11-05') === 1965);
+check('Eastern date does not switch at UTC midnight', d.getTodayKey(new Date('2026-11-06T04:59:59Z')) === '2026-11-05');
+check('Eastern date switches at local midnight', d.getTodayKey(new Date('2026-11-06T05:00:00Z')) === '2026-11-06');
 check('dayNumber monotonic', d.dayNumber('2026-11-05') - d.dayNumber('2026-11-04') === 1);
 
 // --- game flow ---

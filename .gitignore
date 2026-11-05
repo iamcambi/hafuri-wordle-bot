@@ -2,5 +2,6 @@ node_modules/
 .env
 data/stats.json
 data/daily.json
+data/nyt-puzzles.json
 data/*.tmp
 *.log

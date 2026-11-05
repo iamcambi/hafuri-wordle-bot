@@ -6,7 +6,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "test": "node test/logic.test.mjs && node test/handler.test.mjs"
+    "test": "node test/nyt.test.mjs && node test/logic.test.mjs && node test/handler.test.mjs && node test/outage.test.mjs"
   },
   "license": "MIT",
   "dependencies": {

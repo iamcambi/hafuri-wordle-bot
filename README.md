@@ -6,8 +6,11 @@ community, scoped to the **#puzzles** channel. Built on
 
 ## How it works
 
-Everyone in the server guesses the **same secret 5-letter word each day** —
-just like real-world daily Wordle. The word changes once a day at midnight
+Everyone in the server guesses **NYT's actual daily 5-letter word** for the
+configured calendar date. The bot uses NYT's dated puzzle endpoint, for example
+https://www.nytimes.com/svc/wordle/v2/2026-11-05.json, rather than choosing a
+word from its own list. This is an unofficial community bot, not an NYT app.
+The word changes once a day at midnight
 (configurable timezone, default `America/New_York`), and each player gets one
 attempt at it — 6 tries, tracked independently per player.
 
@@ -27,9 +30,9 @@ attempt at it — 6 tries, tracked independently per player.
 - The grid has six numbered rows, spaces between tiles, white tiles for unused
   guesses, and a marker on the next row. Copyable result grids stay compact.
 - Daily puzzles are numbered with the same numbering as the NYT app
-  (e.g. "Wordle #1,966")
+  (e.g. "Wordle #1,965" on 2026-11-05)
 - When you finish (win, lose, or give up), the bot **DMs you the answer**
-  together with a spoiler-free share text (`Wordle #1,966 4/6*` + your grid)
+  together with a spoiler-free share text (`Wordle #1,965 4/6*` + your grid)
 - Streaks follow the NYT rule: winning on consecutive days builds a streak;
   skipping a day resets it
 
@@ -51,13 +54,28 @@ channel sees your complete guess messages after the bot removes them:
   disabled), the bot says so in-channel and offers `!wordle answer` as a
   retry.
 - The public channel only ever announces *that* someone solved it and in how
-  many guesses (e.g. "🎉 hafuri solved Wordle #1,966 in 2/6!") — never the word
+  many guesses (e.g. "🎉 hafuri solved Wordle #1,965 in 2/6!") — never the word
   itself.
 
 Per-user stats (played, won, current streak, best streak, guess distribution)
 persist to `data/stats.json` across restarts. Today's shared word and each
 player's in-progress attempts persist to `data/daily.json` (kept for the last
 14 days, then pruned).
+
+Official answers are validated against the requested date and puzzle number,
+then cached privately in `data/nyt-puzzles.json`. The same date reuses its
+cached answer across restarts. If neither a valid cache nor the official
+endpoint is available, starting a game fails with an explanation; the bot
+never substitutes yesterday's word or a randomly selected local answer.
+
+### Quiet public messages
+
+Every public bot reply uses Fluxer's `SUPPRESS_NOTIFICATIONS` flag (`4096`),
+disables reply pings, disables all mention types, and disables text-to-speech.
+This applies to guess feedback, start/resume messages, results, help, and errors.
+See https://docs.fluxer.com/http-api/messages/ for the platform flag.
+Player-authored guesses still follow each member's own channel notification
+settings; a bot cannot suppress notifications on another person's message.
 
 The bot only reads/reacts to messages in the configured #puzzles channel — it
 ignores every other channel. It holds View Channel, Send Messages, Read
@@ -78,9 +96,8 @@ needed solely to delete players' raw guess messages).
    cp .env.example .env
    ```
 
-   The `.env` shipped alongside this README already has the real
-   `Wordle_Bot` credentials for hafuri lofi filled in — you can use it as-is
-   unless you're rotating the token or moving to a different bot/channel.
+   Supply your own bot token. Real credentials are not shipped or committed;
+   keep `.env` private when moving or backing up the deployment.
 
 2. Build and start the bot in the background:
 
@@ -133,6 +150,7 @@ Make sure whichever `node` is on your `PATH` is >= 22.13.0 — check with
 | `FLUXER_API_URL` | Instance discovery origin, e.g. `https://api.canary.fluxer.app` |
 | `PUZZLES_CHANNEL_ID` | Channel ID the bot watches (hafuri lofi's #puzzles) |
 | `ANSWER_TIMEZONE` | Optional. IANA timezone used to compute "today" for the shared daily word (default `America/New_York`). |
+| `NYT_CACHE_FILE` | Optional. Private official-puzzle cache path (default `data/nyt-puzzles.json`). |
 | `HEALTH_PORT` | Optional. Port for a plain HTTP health endpoint (`200` once logged in, `503` before). Used by the Docker healthcheck. Leave unset to disable it. |
 
 **Never commit `.env`** — it holds a live bot token. `.gitignore` already
@@ -164,7 +182,9 @@ discovery format.
 ```
 src/
   index.js     — bot entry point, command handling, health server
-  daily.js     — deterministic date-seeded shared daily word + puzzle numbering
+  daily.js     — timezone-aware NYT date and zero-based puzzle numbering
+  nyt.js       — validated official puzzle fetching and durable date-pinned cache
+  notifications.js — silent public messages with all mention types disabled
   dailyStore.js — persistent per-day per-user progress (data/daily.json)
   game.js      — DailyGameManager: shared-word game logic + hard mode
   wordle.js    — guess evaluation, board/keyboard rendering, share text

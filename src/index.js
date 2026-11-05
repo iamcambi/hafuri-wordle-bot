@@ -3,7 +3,8 @@ import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { Client, Events } from '@fluxerjs/core';
 import { DailyGameManager } from './game.js';
-import { ANSWER_TIMEZONE, getTodayKey, puzzleNumber } from './daily.js';
+import { ANSWER_TIMEZONE, getTodayKey, puzzleNumber, ensureDailyPuzzle } from './daily.js';
+import { quietReply, quietSend } from './notifications.js';
 import { recordResult, getStats, getHardMode, setHardMode, renderDistribution } from './stats.js';
 import {
   MAX_ATTEMPTS,
@@ -37,7 +38,7 @@ const GUESS_RE = /^[a-zA-Z]{5}$/;
 
 function helpText() {
   return [
-    '**Wordle** — everyone in the server guesses the same secret 5-letter word each day, 6 tries each.',
+    '**Wordle** — everyone guesses NYT’s word for the same calendar date, 6 tries each.',
     '`!wordle` — start (or resume) today\'s word',
     '`!wordle end` — give up on today\'s word (I\'ll DM you the answer)',
     '`!wordle hard` — toggle hard mode (revealed hints must be reused, like the NYT app)',
@@ -48,7 +49,7 @@ function helpText() {
     "Once you've started today's puzzle, just type any 5-letter word in this channel to guess.",
     `The word resets once a day (midnight ${ANSWER_TIMEZONE}) — each player gets one attempt at it per day.`,
     '🟩 = right letter, right spot · 🟨 = right letter, wrong spot · ⬛ = not in the word',
-    'Your guess message is deleted right away and I only show the colored squares — nobody else can see exactly what you typed, and I never say the word in the channel. The answer goes to your DMs once you finish.',
+    'Your full guess is deleted right away. The shared channel shows the tile grid and letter hints; the answer goes to your DMs once you finish. Routine bot replies are silent and do not ping people.',
   ].join('\n');
 }
 
@@ -109,27 +110,34 @@ export async function handleMessage(message, games) {
     const lower = content.toLowerCase();
 
     if (lower === '!wordle' || lower === '!wordle start') {
+      const dateKey = getTodayKey();
       const existing = games.get(userId);
       if (existing) {
         if (existing.status !== 'playing') {
-          await message.reply(
+          await quietReply(message,
             `${resultLabel(existing)}\n${renderBoard(existing)}\n` +
               `You've used today's attempt. Come back after midnight ${ANSWER_TIMEZONE} for a new word, ` +
               'or check `!wordle leaderboard`.'
           );
           return;
         }
-        await message.reply(
+        await quietReply(message,
           `You're already on today's word (${existing.attempts.length}/${MAX_ATTEMPTS} guesses used).\n\n` +
             `${boardWithKeyboard(existing)}\n\n` +
             'Type a 5-letter guess, or `!wordle end` to give up.'
         );
         return;
       }
+      try {
+        await ensureDailyPuzzle(dateKey);
+      } catch {
+        await quietReply(message, "I couldn't load NYT's puzzle for today. Please try again shortly; I won't substitute a different word.");
+        return;
+      }
       const hard = getHardMode(userId);
-      games.start(userId);
-      await message.reply(
-        `**Daily puzzle #${todayPuzzleNo().toLocaleString()}!** Everyone in the server is guessing the same secret ${WORD_LENGTH}-letter word today. ` +
+      games.start(userId, dateKey);
+      await quietReply(message,
+        `**Daily puzzle #${puzzleNumber(dateKey).toLocaleString()}!** Everyone is guessing NYT’s ${WORD_LENGTH}-letter word for today (${dateKey}). ` +
           `You have ${MAX_ATTEMPTS} tries — just type a 5-letter word in this channel. \`${hard ? 'Hard mode is ON — revealed hints must be reused. ' : ''}!wordle help\` for the rules.`
       );
       return;
@@ -140,15 +148,15 @@ export async function handleMessage(message, games) {
       if (!entry) {
         const existing = games.get(userId);
         if (existing) {
-          await message.reply("You've already finished today's word — try `!wordle` to see your result.");
+          await quietReply(message, "You've already finished today's word — try `!wordle` to see your result.");
         } else {
-          await message.reply("You don't have a game running. Start today's with `!wordle`.");
+          await quietReply(message, "You don't have a game running. Start today's with `!wordle`.");
         }
         return;
       }
       recordResult(userId, false, entry.attempts.length);
       const dmOk = await sendResultDM(message.author, entry);
-      await message.reply(
+      await quietReply(message,
         `Gave up on today's word.\n${renderBoard(entry)}\n` +
           (dmOk ? "I DM'd you the answer — no spoilers here." : "I couldn't DM you the answer — enable DMs from server members, then run `!wordle answer`.")
       );
@@ -159,7 +167,7 @@ export async function handleMessage(message, games) {
       const on = setHardMode(userId, !getHardMode(userId));
       const entry = games.get(userId);
       const inProgress = entry && entry.status === 'playing';
-      await message.reply(
+      await quietReply(message,
         on
           ? `Hard mode **ON** — like the NYT app, revealed hints (🟩 and 🟨) must be reused in later guesses.${inProgress ? " Today's puzzle already started, so it kicks in tomorrow." : ''}`
           : `Hard mode **off**.${inProgress ? " Today's puzzle already started, so it stays on for today." : ''}`
@@ -170,7 +178,7 @@ export async function handleMessage(message, games) {
     if (lower === '!wordle leaderboard' || lower === '!wordle today') {
       const board = games.leaderboardToday();
       if (!board.length) {
-        await message.reply("Nobody's finished today's word yet — be the first with `!wordle`!");
+        await quietReply(message, "Nobody's finished today's word yet — be the first with `!wordle`!");
         return;
       }
       const lines = await Promise.all(
@@ -191,7 +199,7 @@ export async function handleMessage(message, games) {
           return `${i + 1}. ${name} — ${tag}`;
         })
       );
-      await message.reply(`**Today's leaderboard (Wordle #${todayPuzzleNo().toLocaleString()})**\n${lines.join('\n')}`);
+      await quietReply(message, `**Today's leaderboard (Wordle #${todayPuzzleNo().toLocaleString()})**\n${lines.join('\n')}`);
       return;
     }
 
@@ -206,7 +214,7 @@ export async function handleMessage(message, games) {
           `Hard mode: ${s.hardMode ? 'on' : 'off'}\n` +
           `\n**Guess distribution**\n\`\`\`\n${renderDistribution(s)}\n\`\`\``
       );
-      await message.reply(
+      await quietReply(message,
         dmOk ? 'Sent your stats via DM.' : "I couldn't DM you — enable DMs from server members and try again."
       );
       return;
@@ -215,30 +223,30 @@ export async function handleMessage(message, games) {
     if (lower === '!wordle answer') {
       const entry = games.get(userId);
       if (!entry) {
-        await message.reply("Start today's puzzle first with `!wordle`.");
+        await quietReply(message, "Start today's puzzle first with `!wordle`.");
         return;
       }
       if (entry.status === 'playing') {
-        await message.reply("No cheating — finish today's puzzle (or `!wordle end`) and I'll DM you the answer.");
+        await quietReply(message, "No cheating — finish today's puzzle (or `!wordle end`) and I'll DM you the answer.");
         return;
       }
       const dmOk = await dm(
         message.author,
         `Today's word was \`${entry.answer.toUpperCase()}\` — Wordle #${todayPuzzleNo().toLocaleString()}`
       );
-      await message.reply(
+      await quietReply(message,
         dmOk ? "I DM'd you today's answer." : "I couldn't DM you — enable DMs from server members and try again."
       );
       return;
     }
 
     if (lower === '!wordle help') {
-      await message.reply(helpText());
+      await quietReply(message, helpText());
       return;
     }
 
     if (lower.startsWith('!wordle')) {
-      await message.reply('Unknown command. Try `!wordle help`.');
+      await quietReply(message, 'Unknown command. Try `!wordle help`.');
       return;
     }
 
@@ -260,16 +268,16 @@ export async function handleMessage(message, games) {
     const outcome = games.guess(userId, content);
 
     if (outcome.status === 'invalid-word') {
-      await message.send("That's not a word I recognize. Try another 5-letter guess.");
+      await quietSend(message, "That's not a word I recognize. Try another 5-letter guess.");
       return;
     }
     if (outcome.status === 'no-game') return;
     if (outcome.status === 'already-done') {
-      await message.send("You've already finished today's word — try `!wordle` to see your result, or `!wordle leaderboard`.");
+      await quietSend(message, "You've already finished today's word — try `!wordle` to see your result, or `!wordle leaderboard`.");
       return;
     }
     if (outcome.status === 'hard-mode') {
-      await message.send(
+      await quietSend(message,
         `Hard mode is on — your guess must use the hints you've revealed:\n` +
           `- ${outcome.issues.join('\n- ')}\n` +
           'Turn it off with `!wordle hard` (applies from tomorrow).'
@@ -284,7 +292,7 @@ export async function handleMessage(message, games) {
     if (status === 'win') {
       const s = recordResult(userId, true, entry.attempts.length);
       const dmOk = await sendResultDM(message.author, entry);
-      await message.send(
+      await quietSend(message,
         `${renderBoard(entry)}\n\n🎉 ${username} solved Wordle #${no} in ${entry.attempts.length}/${MAX_ATTEMPTS}${entry.hardMode ? '*' : ''}! ` +
           `Current streak: ${s.currentStreak} · \`${dmOk ? "answer DM'd" : 'DM failed'}\` · \`!wordle leaderboard\` for today's standings.`
       );
@@ -294,14 +302,14 @@ export async function handleMessage(message, games) {
     if (status === 'lose') {
       recordResult(userId, false, entry.attempts.length);
       const dmOk = await sendResultDM(message.author, entry);
-      await message.send(
+      await quietSend(message,
         `${renderBoard(entry)}\n\n${username} is out of guesses on Wordle #${no}. ` +
           `${dmOk ? 'The answer is in your DMs.' : "I couldn't DM you the answer — enable DMs from server members, then run `!wordle answer`."} Try again tomorrow!`
       );
       return;
     }
 
-    await message.send(
+    await quietSend(message,
       `${boardWithKeyboard(entry)}\n\n${MAX_ATTEMPTS - entry.attempts.length} guess(es) left.`
     );
   } catch (err) {

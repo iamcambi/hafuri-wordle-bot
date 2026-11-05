@@ -1,12 +1,4 @@
-import { ANSWERS } from './words.js';
-
-// Big odd prime chosen so that stepping through the ANSWERS array by this
-// amount (mod its length) visits every index exactly once before repeating
-// -- a full-period linear walk. This spreads consecutive calendar days
-// across the whole answer list (instead of replaying it in file order)
-// without needing any persisted "words already used" state.
-const STEP = 104729; // the 10,000th prime -- coprime with any realistic list length
-const OFFSET = 733957; // arbitrary large constant, just decorrelates day 0 from index 0
+import { getCachedNytPuzzle, ensureNytPuzzle } from './nyt.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const EPOCH_MS = Date.UTC(2024, 0, 1); // arbitrary fixed reference point, never changes
@@ -43,8 +35,7 @@ export function dayNumber(dateKey) {
   return epochDayNumber(dateKey);
 }
 
-// Wordle #1 was June 19, 2021 — keep the same numbering as the NYT app so
-// daily puzzle numbers feel familiar.
+// Wordle #0 was June 19, 2021. NYT's days_since_launch is zero-based.
 const WORDLE_EPOCH_MS = Date.UTC(2021, 5, 19);
 
 /**
@@ -53,17 +44,17 @@ const WORDLE_EPOCH_MS = Date.UTC(2021, 5, 19);
 export function puzzleNumber(dateKey) {
   const [y, m, d] = dateKey.split('-').map(Number);
   const ms = Date.UTC(y, m - 1, d);
-  return Math.floor((ms - WORDLE_EPOCH_MS) / DAY_MS) + 1;
+  return Math.floor((ms - WORDLE_EPOCH_MS) / DAY_MS);
 }
 
 /**
- * Deterministic answer for a given date key. Same word for every player,
- * every process, every restart -- as long as data/answers.txt doesn't
- * change -- so the puzzle is genuinely shared across the whole server.
+ * Fetch and persist NYT's official puzzle before starting a new game.
  */
+export function ensureDailyPuzzle(dateKey = getTodayKey()) {
+  return ensureNytPuzzle(dateKey);
+}
+
+/** Read only an already-validated official answer, never a generated fallback. */
 export function getDailyAnswer(dateKey) {
-  const day = epochDayNumber(dateKey);
-  const len = ANSWERS.length;
-  const index = (((day * STEP + OFFSET) % len) + len) % len;
-  return ANSWERS[index];
+  return getCachedNytPuzzle(dateKey).solution;
 }

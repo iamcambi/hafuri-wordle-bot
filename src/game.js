@@ -1,6 +1,6 @@
 import { evaluateGuess, WORD_LENGTH, MAX_ATTEMPTS, hardModeIssues } from './wordle.js';
 import { VALID_GUESSES } from './words.js';
-import { getTodayKey, getDailyAnswer } from './daily.js';
+import { getTodayKey, getDailyAnswer, puzzleNumber } from './daily.js';
 import { getHardMode } from './stats.js';
 import { getPlayerEntry, savePlayerEntry, getLeaderboard } from './dailyStore.js';
 
@@ -26,13 +26,15 @@ export class DailyGameManager {
   }
 
   /** Start (or resume) today's puzzle for a player. */
-  start(userId) {
-    const dateKey = this.todayKey();
+  start(userId, dateKey = this.todayKey()) {
     const existing = getPlayerEntry(dateKey, userId);
     if (existing) return existing;
 
     const entry = {
       answer: getDailyAnswer(dateKey),
+      source: 'nyt',
+      dateKey,
+      puzzleNumber: puzzleNumber(dateKey),
       attempts: [],
       status: 'playing', // 'playing' | 'won' | 'lost' | 'gaveup'
       hardMode: getHardMode(userId),
@@ -70,7 +72,7 @@ export class DailyGameManager {
     if (entry.status !== 'playing') return { status: 'already-done', entry };
 
     const word = rawWord.toLowerCase();
-    if (word.length !== WORD_LENGTH || !VALID_GUESSES.has(word)) {
+    if (word.length !== WORD_LENGTH || (!VALID_GUESSES.has(word) && word !== entry.answer)) {
       return { status: 'invalid-word' };
     }
 
