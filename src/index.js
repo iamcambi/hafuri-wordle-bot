@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
-import { Client, Events } from '@fluxerjs/core';
+import { Client, Events, ChannelType } from '@fluxerjs/core';
 import { DailyGameManager } from './game.js';
 import { ANSWER_TIMEZONE, getTodayKey, puzzleNumber, ensureDailyPuzzle } from './daily.js';
 import { quietReply, quietSend } from './notifications.js';
@@ -39,17 +39,17 @@ const GUESS_RE = /^[a-zA-Z]{5}$/;
 function helpText() {
   return [
     '**Wordle** — everyone guesses NYT’s word for the same calendar date, 6 tries each.',
-    '`!wordle` — start (or resume) today\'s word',
+    '`!wordle` — start (or resume) in our DM; in #puzzles, I will DM you the game',
     '`!wordle end` — give up on today\'s word (I\'ll DM you the answer)',
     '`!wordle hard` — toggle hard mode (revealed hints must be reused, like the NYT app)',
     '`!wordle stats` — I\'ll DM you your win rate, streak, and guess distribution',
     '`!wordle leaderboard` — see who has finished today\'s word so far',
     '`!wordle answer` — DM today\'s answer (only after you\'ve finished today\'s puzzle)',
     '`!wordle help` — show this message',
-    "Once you've started today's puzzle, just type any 5-letter word in this channel to guess.",
+    'Send all five-letter guesses **in your one-to-one DM with Wordle_Bot**, not in #puzzles.',
     `The word resets once a day (midnight ${ANSWER_TIMEZONE}) — each player gets one attempt at it per day.`,
     '🟩 = right letter, right spot · 🟨 = right letter, wrong spot · ⬛ = not in the word',
-    'Your full guess is deleted right away. The shared channel shows the tile grid and letter hints; the answer goes to your DMs once you finish. Routine bot replies are silent and do not ping people.',
+    'Guesses, grids, hints, and results stay in DMs. There are no per-guess server posts or automatic completion announcements. The shared leaderboard is available on request, and public bot replies are silent.',
   ].join('\n');
 }
 
@@ -96,35 +96,94 @@ function boardWithKeyboard(entry) {
   return `**Your guesses**\n\n${renderBoard(entry)}\n\n${renderKeyboard(entry.attempts)}`;
 }
 
+/** Only one-to-one DMs from members of the configured community may play. */
+async function communityDM(message) {
+  if (message.guildId !== null) return false;
+  const channel = message.channel || await message.resolveChannel();
+  return channel?.type === ChannelType.DM;
+}
+
+async function isCommunityMember(message) {
+  try {
+    const channel = await message.client.channels.fetch(PUZZLES_CHANNEL_ID);
+    if (!channel?.guildId) return false;
+    const guild = await message.client.guilds.fetch(channel.guildId);
+    return Boolean(await guild.members.fetch(message.author.id));
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Handle one incoming message. Exported so the command/guess flow can be
  * exercised without a live Fluxer connection (see test/handler.test.mjs).
  */
+const messageQueues = new WeakMap();
+
+/** Preserve the order of each player's messages across asynchronous DM checks. */
 export async function handleMessage(message, games) {
+  if (!message.author?.id || message.author.bot) return;
+  let queues = messageQueues.get(games);
+  if (!queues) {
+    queues = new Map();
+    messageQueues.set(games, queues);
+  }
+  const userId = message.author.id;
+  const previous = queues.get(userId) || Promise.resolve();
+  const operation = previous.catch(() => {}).then(() => processMessage(message, games));
+  queues.set(userId, operation);
+  try {
+    await operation;
+  } finally {
+    if (queues.get(userId) === operation) queues.delete(userId);
+  }
+}
+
+async function processMessage(message, games) {
   try {
     if (message.author.bot) return;
-    if (message.channelId !== PUZZLES_CHANNEL_ID) return;
+    const inPuzzles = message.channelId === PUZZLES_CHANNEL_ID;
+    const inDM = !inPuzzles && await communityDM(message);
+    if (!inPuzzles && !inDM) return;
+    if (inDM && !await isCommunityMember(message)) {
+      await quietReply(message, "I couldn't verify your membership in the Wordle community. Please make sure you're still a member and try again; you can start with `!wordle` in #puzzles.");
+      return;
+    }
 
     const userId = message.author.id;
     const content = message.content.trim();
     const lower = content.toLowerCase();
+
+    async function gameMessage(text, onDelivered = () => {}) {
+      if (inDM) {
+        onDelivered();
+        await quietReply(message, text);
+        return true;
+      }
+      const delivered = await dm(message.author, text);
+      if (delivered) onDelivered();
+      await quietReply(message, delivered
+        ? 'Your Wordle game is in our DM. Send every five-letter guess **there**, not in #puzzles, so guesses cannot notify the server.'
+        : "I couldn't DM you. Enable direct messages from this community, or open a one-to-one DM with Wordle_Bot and send `!wordle`. No guess was used.");
+      return delivered;
+    }
 
     if (lower === '!wordle' || lower === '!wordle start') {
       const dateKey = getTodayKey();
       const existing = games.get(userId);
       if (existing) {
         if (existing.status !== 'playing') {
-          await quietReply(message,
+          await gameMessage(
             `${resultLabel(existing)}\n${renderBoard(existing)}\n` +
               `You've used today's attempt. Come back after midnight ${ANSWER_TIMEZONE} for a new word, ` +
               'or check `!wordle leaderboard`.'
           );
           return;
         }
-        await quietReply(message,
+        await gameMessage(
           `You're already on today's word (${existing.attempts.length}/${MAX_ATTEMPTS} guesses used).\n\n` +
             `${boardWithKeyboard(existing)}\n\n` +
-            'Type a 5-letter guess, or `!wordle end` to give up.'
+            'Send your next five-letter guess here in our DM, or `!wordle end` to give up. Do not post guesses in #puzzles.'
         );
         return;
       }
@@ -135,10 +194,12 @@ export async function handleMessage(message, games) {
         return;
       }
       const hard = getHardMode(userId);
-      games.start(userId, dateKey);
-      await quietReply(message,
+      await gameMessage(
         `**Daily puzzle #${puzzleNumber(dateKey).toLocaleString()}!** Everyone is guessing NYT’s ${WORD_LENGTH}-letter word for today (${dateKey}). ` +
-          `You have ${MAX_ATTEMPTS} tries — just type a 5-letter word in this channel. \`${hard ? 'Hard mode is ON — revealed hints must be reused. ' : ''}!wordle help\` for the rules.`
+          `You have ${MAX_ATTEMPTS} tries.${hard ? ' Hard mode is ON — revealed hints must be reused.' : ''}\n\n` +
+          `${boardWithKeyboard({ attempts: [], status: 'playing' })}\n\n` +
+          'Send your five-letter guesses here in our DM. Nothing is posted to the server when you guess or finish. `!wordle help` for the rules.',
+        () => games.start(userId, dateKey)
       );
       return;
     }
@@ -156,10 +217,11 @@ export async function handleMessage(message, games) {
       }
       recordResult(userId, false, entry.attempts.length);
       const dmOk = await sendResultDM(message.author, entry);
-      await quietReply(message,
-        `Gave up on today's word.\n${renderBoard(entry)}\n` +
-          (dmOk ? "I DM'd you the answer — no spoilers here." : "I couldn't DM you the answer — enable DMs from server members, then run `!wordle answer`.")
-      );
+      if (!inDM || !dmOk) {
+        await quietReply(message, dmOk
+          ? "I DM'd you your result and the answer — no spoilers here."
+          : "I couldn't DM you the answer — enable DMs from server members, then run `!wordle answer`.");
+      }
       return;
     }
 
@@ -214,9 +276,8 @@ export async function handleMessage(message, games) {
           `Hard mode: ${s.hardMode ? 'on' : 'off'}\n` +
           `\n**Guess distribution**\n\`\`\`\n${renderDistribution(s)}\n\`\`\``
       );
-      await quietReply(message,
-        dmOk ? 'Sent your stats via DM.' : "I couldn't DM you — enable DMs from server members and try again."
-      );
+      if (!inDM || !dmOk) await quietReply(message,
+        dmOk ? 'Sent your stats via DM.' : "I couldn't DM you — enable DMs from server members and try again.");
       return;
     }
 
@@ -234,9 +295,8 @@ export async function handleMessage(message, games) {
         message.author,
         `Today's word was \`${entry.answer.toUpperCase()}\` — Wordle #${todayPuzzleNo().toLocaleString()}`
       );
-      await quietReply(message,
-        dmOk ? "I DM'd you today's answer." : "I couldn't DM you — enable DMs from server members and try again."
-      );
+      if (!inDM || !dmOk) await quietReply(message,
+        dmOk ? "I DM'd you today's answer." : "I couldn't DM you — enable DMs from server members and try again.");
       return;
     }
 
@@ -250,19 +310,19 @@ export async function handleMessage(message, games) {
       return;
     }
 
-    // Not a command — only treat a plain 5-letter word as a guess if this
-    // player has started today's puzzle.
+    // A guess must originate in a verified one-to-one DM. Accidental public
+    // guesses are removed and privately redirected, never counted or evaluated.
     if (!games.get(userId)) return;
     if (!GUESS_RE.test(content)) return;
-
-    // Scrub the raw guess from the channel immediately, before evaluating
-    // or replying, so nobody else ever sees another player's exact input
-    // (and never see the answer implied by a winning guess). Requires the
-    // bot to have the "Manage Messages" permission in this channel.
-    try {
-      await message.delete();
-    } catch (err) {
-      console.error('Could not delete guess message (check Manage Messages permission):', err);
+    if (!inDM) {
+      try {
+        await message.delete();
+      } catch (err) {
+        console.error('Could not remove an accidental public guess:', err.message);
+      }
+      const delivered = await dm(message.author, "Guesses are DM-only now. Your message in #puzzles was **not counted**. Send that five-letter word here in our DM to play; no guess feedback will be posted to the server.");
+      if (!delivered) await quietSend(message, "Guesses are DM-only now. I couldn't DM you; enable direct messages from this community and send `!wordle` to Wordle_Bot. No guess was used.");
+      return;
     }
 
     const outcome = games.guess(userId, content);
@@ -286,26 +346,17 @@ export async function handleMessage(message, games) {
     }
 
     const { entry, status } = outcome;
-    const username = message.author.username || userId;
-    const no = todayPuzzleNo().toLocaleString();
-
     if (status === 'win') {
-      const s = recordResult(userId, true, entry.attempts.length);
+      recordResult(userId, true, entry.attempts.length);
       const dmOk = await sendResultDM(message.author, entry);
-      await quietSend(message,
-        `${renderBoard(entry)}\n\n🎉 ${username} solved Wordle #${no} in ${entry.attempts.length}/${MAX_ATTEMPTS}${entry.hardMode ? '*' : ''}! ` +
-          `Current streak: ${s.currentStreak} · \`${dmOk ? "answer DM'd" : 'DM failed'}\` · \`!wordle leaderboard\` for today's standings.`
-      );
+      if (!dmOk) await quietSend(message, "Your win is saved, but I couldn't send the result. Try `!wordle answer` here to retry.");
       return;
     }
 
     if (status === 'lose') {
       recordResult(userId, false, entry.attempts.length);
       const dmOk = await sendResultDM(message.author, entry);
-      await quietSend(message,
-        `${renderBoard(entry)}\n\n${username} is out of guesses on Wordle #${no}. ` +
-          `${dmOk ? 'The answer is in your DMs.' : "I couldn't DM you the answer — enable DMs from server members, then run `!wordle answer`."} Try again tomorrow!`
-      );
+      if (!dmOk) await quietSend(message, "Your result is saved, but I couldn't send the answer. Try `!wordle answer` here to retry.");
       return;
     }
 

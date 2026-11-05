@@ -1,7 +1,7 @@
 # Hafuri Wordle Bot
 
 A self-hosted, multiplayer daily Wordle bot for the **hafuri lofi** Fluxer
-community, scoped to the **#puzzles** channel. Built on
+community, with **DM-only gameplay** and a quiet **#puzzles** entry point. Built on
 [`@fluxerjs/core`](https://fluxerjs.blstmo.com).
 
 ## How it works
@@ -14,8 +14,9 @@ The word changes once a day at midnight
 (configurable timezone, default `America/New_York`), and each player gets one
 attempt at it — 6 tries, tracked independently per player.
 
-- `!wordle` — start (or resume) today's word
-- Type any 5-letter word in #puzzles while your game is running — it's your guess
+- `!wordle` — start or resume in a one-to-one DM with Wordle_Bot; in #puzzles,
+  this sends the game by DM and posts only a silent pointer
+- Send five-letter guesses **only in your DM with Wordle_Bot**, never in #puzzles
 - `!wordle end` — give up on today's word (the answer is DM'd to you)
 - `!wordle hard` — toggle hard mode (revealed hints must be reused, like the NYT app)
 - `!wordle stats` — your all-time record, streak, and guess distribution (sent via DM)
@@ -36,26 +37,24 @@ attempt at it — 6 tries, tracked independently per player.
 - Streaks follow the NYT rule: winning on consecutive days builds a streak;
   skipping a day resets it
 
-### Guesses are hidden from other players
+### Private, quiet gameplay
 
-Typing a 5-letter word is the only way to guess, but nobody else in the
-channel sees your complete guess messages after the bot removes them:
-
-- Your guess message is **deleted immediately** after the bot reads it
-  (requires the bot to hold the **Manage Messages** permission in #puzzles).
-- The board uses **colored tile squares**, not complete guessed words. During
-  play, the named letter hints are visible in the shared channel; other players
-  can see these clues. This is not a fully private or spoiler-free play mode.
-- Once you win or run out of guesses, letter hints move into the result DM.
-  The public completion message omits the letter-position pattern so it does
-  not spell out a winning answer.
-- The answer itself is only ever sent to the finishing player **via DM**,
-  never in the channel. If a DM can't be delivered (DMs from server members
-  disabled), the bot says so in-channel and offers `!wordle answer` as a
-  retry.
-- The public channel only ever announces *that* someone solved it and in how
-  many guesses (e.g. "🎉 hafuri solved Wordle #1,965 in 2/6!") — never the word
-  itself.
+- Guesses, grids, named letter hints, errors, answers, and completion results
+  stay in the player's one-to-one DM. Playing or finishing creates **no server
+  messages**, so those guesses cannot trigger server notifications.
+- Starting from #puzzles sends the board privately and posts only a silent
+  direction to continue in DMs. Starting directly by DM works too.
+- One-to-one DM players must be verified members of the community containing
+  #puzzles. Other communities and group DMs are ignored.
+- If DMs are blocked, the bot explains how to enable them without creating a
+  new game or consuming a guess. Existing game progress is preserved.
+- Accidental five-letter guesses in #puzzles are not evaluated or counted.
+  The bot tries to remove them and sends a private redirect. Deletion cannot
+  undo a notification a player's public message already triggered, so players
+  must use DMs to keep their guesses out of server notifications.
+- Wins, losses, and give-ups still update shared stats and the daily leaderboard,
+  but no automatic finish announcement is posted. Anyone can explicitly request
+  `!wordle leaderboard` in #puzzles or in their DM.
 
 Per-user stats (played, won, current streak, best streak, guess distribution)
 persist to `data/stats.json` across restarts. Today's shared word and each
@@ -74,13 +73,13 @@ Every public bot reply uses Fluxer's `SUPPRESS_NOTIFICATIONS` flag (`4096`),
 disables reply pings, disables all mention types, and disables text-to-speech.
 This applies to guess feedback, start/resume messages, results, help, and errors.
 See https://docs.fluxer.com/http-api/messages/ for the platform flag.
-Player-authored guesses still follow each member's own channel notification
-settings; a bot cannot suppress notifications on another person's message.
+Player-authored public commands and accidental public posts still follow each
+member's own notification settings. Normal guesses are private DMs instead.
 
-The bot only reads/reacts to messages in the configured #puzzles channel — it
-ignores every other channel. It holds View Channel, Send Messages, Read
-Message History, and Manage Messages on the Fluxer side (the last one is
-needed solely to delete players' raw guess messages).
+The bot only responds in the configured #puzzles channel and verified members'
+one-to-one DMs. It ignores every other server channel and group DM. It holds
+View Channel, Send Messages, Read Message History, and Manage Messages on the
+Fluxer side (the last one is used only to remove accidental public guesses).
 
 ## Requirements
 

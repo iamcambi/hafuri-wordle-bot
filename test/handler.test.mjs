@@ -1,180 +1,153 @@
-// Integration test: drives the real message handler with fake Fluxer
-// message objects — no live connection needed.
+import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { prepareNytFixture } from './nyt-fixture.mjs';
 
 prepareNytFixture();
-process.env.STATS_FILE = join(mkdtempSync(join(tmpdir(), 'stats-')), 'stats.json');
-process.env.DAILY_FILE = join(mkdtempSync(join(tmpdir(), 'daily-')), 'daily.json');
+const dir = mkdtempSync(join(tmpdir(), 'wordle-dm-'));
+process.env.STATS_FILE = join(dir, 'stats.json');
+process.env.DAILY_FILE = join(dir, 'daily.json');
 process.env.PUZZLES_CHANNEL_ID = 'chan-1';
-
-// index.js reads env at import time; set before importing.
 const { handleMessage } = await import('../src/index.js');
 const { DailyGameManager } = await import('../src/game.js');
 const { getTodayKey } = await import('../src/daily.js');
 const { getStats } = await import('../src/stats.js');
-
-let failures = 0;
-const channelPayloads = [];
-function check(name, cond, extra) {
-  if (!cond) { failures++; console.log('FAIL:', name, extra ?? ''); }
-  else console.log('ok  :', name);
-}
-
-/** Fake Fluxer message. Records channel replies/sends and DMs separately. */
-function makeMessage(userId, content) {
-  const state = { replies: [], sends: [], dms: [], deleted: 0 };
-  const msg = {
-    author: {
-      id: userId,
-      bot: false,
-      username: `user_${userId}`,
-      send: async (t) => { state.dms.push(t); },
-    },
-    channelId: 'chan-1',
-    content,
-    reply: async (t) => { channelPayloads.push(t); state.replies.push(t.content); },
-    send: async (t) => { channelPayloads.push(t); state.sends.push(t.content); },
-    delete: async () => { state.deleted++; },
-    client: { users: { fetch: async (id) => ({ username: `user_${id}` }) } },
-  };
-  msg._state = state;
-  return msg;
-}
-
 const games = new DailyGameManager();
+const publicPayloads = [];
+let checks = 0;
+function check(name, condition) {
+  assert.ok(condition, name);
+  checks++;
+  console.log(`ok  : ${name}`);
+}
+const text = (payload) => typeof payload === 'string' ? payload : payload.content;
+function makeMessage(userId, content, { scope = 'dm', blockedDM = false, member = true, uncached = false } = {}) {
+  const state = { replies: [], sends: [], dms: [], deleted: 0, public: [] };
+  const privateChannel = scope === 'dm' || scope === 'group';
+  const channel = { type: scope === 'group' ? 3 : privateChannel ? 1 : 0, guildId: privateChannel ? null : 'guild-1' };
+  const record = (kind, payload) => {
+    state[kind].push(text(payload));
+    if (!privateChannel) {
+      publicPayloads.push(payload);
+      state.public.push(payload);
+    }
+  };
+  return {
+    author: {
+      id: userId, bot: false, username: `user_${userId}`,
+      send: async (payload) => {
+        if (blockedDM) throw Error('DMs blocked');
+        state.dms.push(text(payload));
+      },
+    },
+    guildId: privateChannel ? null : 'guild-1',
+    channelId: scope === 'public' ? 'chan-1' : scope === 'other' ? 'other-channel' : `dm-${userId}`,
+    channel: uncached ? null : channel,
+    resolveChannel: async () => channel,
+    content,
+    reply: async (payload) => record('replies', payload),
+    send: async (payload) => record('sends', payload),
+    delete: async () => { state.deleted++; },
+    client: {
+      channels: { fetch: async () => ({ guildId: 'guild-1' }) },
+      guilds: { fetch: async () => ({ members: { fetch: async (id) => member ? { user: { id } } : null } }) },
+      users: { fetch: async (id) => ({ username: `user_${id}` }) },
+    },
+    _state: state,
+  };
+}
+const dispatch = async (userId, content, options) => {
+  const message = makeMessage(userId, content, options);
+  await handleMessage(message, games);
+  return message._state;
+};
 
-// --- start ---
-let m = makeMessage('u1', '!wordle');
-await handleMessage(m, games);
-check('start announces puzzle number', m._state.replies[0].includes('#') && m._state.replies[0].includes('Daily puzzle'));
-check('start identifies the official NYT date', m._state.replies[0].includes('NYT') && m._state.replies[0].includes(getTodayKey()));
-check('game pins its source and calendar date', games.get('u1').source === 'nyt' && games.get('u1').dateKey === getTodayKey());
+// Public onboarding is only a silent pointer. The actual board stays private.
+let state = await dispatch('u1', '!wordle', { scope: 'public' });
+check('public start sends NYT puzzle and full board by DM', state.dms.some((t) => t.includes('Daily puzzle #') && t.includes('NYT') && t.includes(getTodayKey()) && t.includes('Your guesses')));
+check('public start directs guesses to DMs without exposing hints', state.replies[0].includes('DM') && !state.replies[0].includes('Your letter hints'));
+check('game pins official source and date', games.get('u1').source === 'nyt' && games.get('u1').dateKey === getTodayKey());
+check('public start consumes no guesses', games.get('u1').attempts.length === 0);
 
-// --- invalid guess ---
-m = makeMessage('u1', 'zzzzz');
-await handleMessage(m, games);
-check('invalid guess rejected politely', m._state.sends[0].includes("not a word"));
-check('invalid guess message still deleted', m._state.deleted === 1);
+state = await dispatch('u1', 'crane', { scope: 'public' });
+check('accidental public guess is removed but never counted', state.deleted === 1 && games.get('u1').attempts.length === 0);
+check('accidental public guess gets only a private redirect', state.public.length === 0 && state.dms[0].includes('not counted'));
 
-// --- valid guesses through to a win ---
+state = await dispatch('u1', 'zzzzz');
+check('invalid DM guess gets private feedback', state.sends[0].includes('not a word') && state.public.length === 0);
+check('DM guesses are not deleted', state.deleted === 0);
+const beforeGuesses = publicPayloads.length;
+for (const guess of ['crane', 'slate', 'audio']) {
+  state = await dispatch('u1', guess);
+  check('DM guess returns private spaced grid and named hints', state.sends.some((t) => t.includes('**Your guesses**\n\n`1`') && t.includes('Right spot:') && t.includes('In word, wrong spot:') && t.includes('Not in word:') && t.includes('Not tried:')));
+}
 const answer = games.get('u1').answer;
-const validGuesses = ['crane', 'slate', 'audio'];
-let winState = null;
-for (const gw of validGuesses) {
-  if (gw === answer) break;
-  m = makeMessage('u1', gw);
-  await handleMessage(m, games);
-  if (games.get('u1').status === 'playing') {
-    check('in-progress reply names every letter category', m._state.sends.some((t) => t.includes('Your letter hints') && t.includes('Right spot:') && t.includes('In word, wrong spot:') && t.includes('Not in word:') && t.includes('Not tried:')));
-    check('guess heading is separated from the grid', m._state.sends.some((t) => t.includes('**Your guesses**\n\n`1`')));
-  }
-}
-if (validGuesses.includes(answer)) {
-  m = makeMessage('u1', answer);
-  await handleMessage(m, games);
-}
-// guess the answer directly if not already won
-if (games.get('u1').status === 'playing') {
-  m = makeMessage('u1', answer);
-  await handleMessage(m, games);
-}
-winState = m._state;
-check('win announced publicly', winState.sends.some((t) => t.includes('solved Wordle #')));
-check('win reply shows six numbered grid rows', winState.sends.some((t) => (t.match(/^`[1-6]`  /gm) || []).length === 6));
-check('completed public grid has no next-guess prompt', winState.sends.every((t) => !t.includes('next guess')));
-check('finished letter hints go privately with the result', winState.dms.some((t) => t.includes('Your letter hints') && t.includes('Right spot:') && t.includes('In word, wrong spot:') && t.includes('Not in word:') && t.includes('Not tried:')));
-check('public win does not spell the answer through the position pattern', winState.sends.every((t) => !t.includes('Right spot:') && !t.includes(answer.toUpperCase().split('').join(' '))));
-check('win DM contains the answer', winState.dms.some((t) => t.includes(answer.toUpperCase())));
-check('win DM has spoiler-free share text', winState.dms.some((t) => t.includes('Wordle #') && t.includes('/6')));
-check('win recorded in stats', getStats('u1').won === 1 && getStats('u1').played === 1);
+state = await dispatch('u1', answer);
+check('win and all guesses create zero server messages', publicPayloads.length === beforeGuesses && state.public.length === 0);
+check('win DM has answer and six numbered rows', state.dms.some((t) => t.includes(answer.toUpperCase()) && (t.match(/^`[1-6]`  /gm) || []).length === 6));
+check('win DM has private letter hints and compact share text', state.dms.some((t) => t.includes('Your letter hints') && t.includes('Share your result') && t.includes('/6')));
+check('win records stats once', getStats('u1').won === 1 && getStats('u1').played === 1);
+state = await dispatch('u1', answer);
+check('post-win DM cannot record a second result', state.sends[0].includes('already finished') && getStats('u1').played === 1);
 
-// --- playing again after finishing ---
-m = makeMessage('u1', 'crane');
-await handleMessage(m, games);
-check('post-win guess handled', m._state.sends.length === 0 || m._state.sends[0].includes('already finished'));
+state = await dispatch('u1', '!wordle', { scope: 'public' });
+check('public completed-game resume keeps board private', state.dms.some((t) => t.includes('You solved it')) && state.public.every((p) => !p.content.includes('`1`')));
+state = await dispatch('u1', '!wordle answer');
+check('answer command stays private and avoids duplicate confirmations', state.dms.some((t) => t.includes(answer.toUpperCase())) && state.replies.length === 0);
 
-// --- !wordle answer before finishing (cheating) ---
-m = makeMessage('u2', '!wordle');
-await handleMessage(m, games);
-m = makeMessage('u2', '!wordle answer');
-await handleMessage(m, games);
-check('answer refused while playing', m._state.replies[0].includes('cheating'));
+state = await dispatch('u2', '!wordle', { uncached: true });
+check('member can start directly in an uncached one-to-one DM', state.replies[0].includes('Daily puzzle') && games.get('u2').attempts.length === 0);
+state = await dispatch('u2', '!wordle answer');
+check('answer is refused before finishing', state.replies[0].includes('No cheating'));
+state = await dispatch('u2', '!wordle end');
+check('give-up result is private with no duplicate reply', state.dms.some((t) => t.includes('Gave up') && t.includes(games.get('u2').answer.toUpperCase())) && state.replies.length === 0 && state.public.length === 0);
+check('give-up counts once', getStats('u2').played === 1 && getStats('u2').won === 0);
 
-// --- give up reveals via DM ---
-m = makeMessage('u2', '!wordle end');
-await handleMessage(m, games);
-const u2Answer = games.get('u2').answer;
-check('give-up DMs the answer', m._state.dms.some((t) => t.includes(u2Answer.toUpperCase())));
-check('give-up public reply stays spoiler-free', !m._state.replies[0].includes(u2Answer.toUpperCase()));
-check('give-up counts as played', getStats('u2').played === 1 && getStats('u2').won === 0);
+await dispatch('u3', '!wordle hard');
+state = await dispatch('u3', '!wordle');
+check('DM start mentions enabled hard mode', state.replies[0].includes('Hard mode is ON'));
+await dispatch('u3', 'crane');
+state = await dispatch('u3', 'stone');
+check('DM hard mode rejects hint violations privately', state.sends.some((t) => t.includes('Hard mode is on')) && state.public.length === 0 && games.get('u3').attempts.length === 1);
+const oldAttempt = structuredClone(games.get('u3').attempts);
+state = await dispatch('u3', '!wordle', { scope: 'public' });
+check('public-to-DM resume preserves exact progress', JSON.stringify(games.get('u3').attempts) === JSON.stringify(oldAttempt) && state.dms[0].includes('1/6 guesses used'));
 
-// --- answer after finishing ---
-m = makeMessage('u2', '!wordle answer');
-await handleMessage(m, games);
-check('answer after finish DMs word', m._state.dms.some((t) => t.includes(u2Answer.toUpperCase())));
+state = await dispatch('u1', '!wordle stats', { scope: 'public' });
+check('public stats remain a private DM with a silent pointer', state.dms[0].includes('Guess distribution') && state.replies[0].includes('DM'));
+state = await dispatch('u1', '!wordle stats');
+check('DM stats avoid duplicate confirmations', state.dms[0].includes('Guess distribution') && state.replies.length === 0);
+state = await dispatch('u1', '!wordle leaderboard', { scope: 'public' });
+check('shared leaderboard is available on explicit request', state.replies[0].includes('leaderboard') && state.replies[0].includes('user_u1'));
+state = await dispatch('u1', '!wordle help', { scope: 'public' });
+check('help explains DM-only play and no per-guess server posts', state.replies[0].includes('one-to-one DM') && state.replies[0].includes('no per-guess server posts'));
 
-// --- hard mode toggle + enforcement ---
-m = makeMessage('u3', '!wordle hard');
-await handleMessage(m, games);
-check('hard toggle confirms ON', m._state.replies[0].includes('Hard mode **ON**'));
-m = makeMessage('u3', '!wordle');
-await handleMessage(m, games);
-check('start mentions hard mode when on', m._state.replies[0].includes('Hard mode is ON'));
-m = makeMessage('u3', 'crane');
-await handleMessage(m, games);
-const u3entry = games.get('u3');
-// craft a violating guess: reuse greens wrongly is hard generically; use hardModeIssues via a guess missing a yellow
-const { hardModeIssues } = await import('../src/wordle.js');
-const issues = hardModeIssues(u3entry.attempts, 'stone');
-if (issues.length) {
-  m = makeMessage('u3', 'stone');
-  await handleMessage(m, games);
-  check('hard mode rejects violating guess', m._state.sends.some((t) => t.includes('Hard mode is on')));
-} else {
-  check('hard mode: crane vs answer needs no hints (skipped)', true);
-}
+state = await dispatch('blocked', '!wordle', { scope: 'public', blockedDM: true });
+check('blocked DMs do not create or consume a game', games.get('blocked') === null && state.replies[0].includes('Enable direct messages'));
+state = await dispatch('outsider', '!wordle', { member: false });
+check('non-members cannot enter the community puzzle or leaderboard', games.get('outsider') === null && state.replies[0].includes("couldn't verify your membership"));
+state = await dispatch('group-user', '!wordle', { scope: 'group' });
+check('group DMs are ignored to prevent leaking guesses', games.get('group-user') === null && state.replies.length === 0);
+state = await dispatch('other-user', '!wordle', { scope: 'other' });
+check('other server channels are ignored', games.get('other-user') === null && state.replies.length === 0);
+state = await dispatch('new-user', 'crane');
+check('unstarted DM text is not treated as a guess', games.get('new-user') === null && state.deleted === 0 && state.sends.length === 0);
+const botMessage = makeMessage('another-bot', '!wordle');
+botMessage.author.bot = true;
+await handleMessage(botMessage, games);
+check('bot messages are ignored', games.get('another-bot') === null);
 
-// --- stats DM ---
-m = makeMessage('u1', '!wordle stats');
-await handleMessage(m, games);
-check('stats sent via DM with distribution', m._state.dms.some((t) => t.includes('Guess distribution')));
-check('stats public reply is a pointer only', m._state.replies[0].includes('DM'));
+// Slow async delivery/membership checks must not reorder starts and guesses.
+const queued = [
+  makeMessage('queue-user', '!wordle', { scope: 'public' }),
+  makeMessage('queue-user', 'crane'),
+  makeMessage('queue-user', 'slate'),
+];
+await Promise.all(queued.map((message) => handleMessage(message, games)));
+check('rapid start and DM guesses are processed in order', games.get('queue-user').attempts.map((a) => a.word).join(',') === 'crane,slate');
 
-// --- leaderboard ---
-m = makeMessage('u1', '!wordle leaderboard');
-await handleMessage(m, games);
-check('leaderboard lists players', m._state.replies[0].includes('leaderboard') && m._state.replies[0].includes('user_'));
-
-// --- help ---
-m = makeMessage('u1', '!wordle help');
-await handleMessage(m, games);
-check('help documents new commands', m._state.replies[0].includes('!wordle hard') && m._state.replies[0].includes('!wordle answer'));
-
-// --- unknown command ---
-m = makeMessage('u1', '!wordle bogus');
-await handleMessage(m, games);
-check('unknown command handled', m._state.replies[0].includes('Unknown command'));
-
-// --- messages from other channels / bots ignored ---
-const other = makeMessage('u9', '!wordle');
-other.channelId = 'other-channel';
-await handleMessage(other, games);
-check('other channels ignored', other._state.replies.length === 0);
-const botMsg = makeMessage('bot-1', '!wordle');
-botMsg.author.bot = true;
-await handleMessage(botMsg, games);
-check('bot messages ignored', botMsg._state.replies.length === 0);
-
-// --- guess without starting is not deleted ---
-m = makeMessage('u8', 'crane');
-await handleMessage(m, games);
-check('unstarted guess ignored and left visible', m._state.sends.length === 0 && m._state.deleted === 0);
-
-check('all public bot replies suppress notifications', channelPayloads.length > 0 && channelPayloads.every((p) => p.flags === 4096));
-check('all public bot replies suppress every mention type', channelPayloads.every((p) => p.allowedMentions.parse.length === 0 && p.allowedMentions.users.length === 0 && p.allowedMentions.roles.length === 0 && p.allowedMentions.repliedUser === false && p.ping === false && p.tts === false));
-
-console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURES`);
-process.exit(failures === 0 ? 0 : 1);
+check('all public bot messages suppress notifications', publicPayloads.length > 0 && publicPayloads.every((p) => p.flags === 4096));
+check('all public bot messages suppress every mention type', publicPayloads.every((p) => p.allowedMentions.parse.length === 0 && p.allowedMentions.users.length === 0 && p.allowedMentions.roles.length === 0 && p.allowedMentions.repliedUser === false && p.ping === false && p.tts === false));
+check('no public message contains grids or letter clues', publicPayloads.every((p) => !p.content.includes('Your guesses') && !p.content.includes('Right spot:') && !p.content.includes('In word, wrong spot:')));
+console.log(`\nALL PASS (${checks} DM-flow checks)`);
