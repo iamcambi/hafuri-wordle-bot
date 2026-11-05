@@ -77,7 +77,8 @@ if (games.get('u1').status === 'playing') {
 }
 winState = m._state;
 check('win announced publicly', winState.sends.some((t) => t.includes('solved Wordle #')));
-check('win reply shows full board (multiple tile rows)', winState.sends.some((t) => t.split('🟩').length > 2 || (t.match(/^[🟩🟨⬛]{5}/m) && t.split('\n').length > 3)));
+check('win reply shows six numbered grid rows', winState.sends.some((t) => (t.match(/^`[1-6]`  /gm) || []).length === 6));
+check('completed public grid has no next-guess prompt', winState.sends.every((t) => !t.includes('next guess')));
 check('finished letter hints go privately with the result', winState.dms.some((t) => t.includes('Your letter hints') && t.includes('Right spot:') && t.includes('In word, wrong spot:') && t.includes('Not in word:') && t.includes('Not tried:')));
 check('public win does not spell the answer through the position pattern', winState.sends.every((t) => !t.includes('Right spot:') && !t.includes(answer.toUpperCase().split('').join(' '))));
 check('win DM contains the answer', winState.dms.some((t) => t.includes(answer.toUpperCase())));

@@ -49,10 +49,18 @@ export function renderRow(word, result) {
   return `${renderTiles(result)}  ${word.toUpperCase()}`;
 }
 
-/** An entry's full accumulated board, one tile row per guess (NYT-style). */
+/**
+ * Six numbered rows with separated tiles. A text prefix also prevents chat
+ * clients from turning an emoji-only row into oversized, touching tiles.
+ * Keep the compact spoiler-free sharing format separate in shareGrid().
+ */
 export function renderBoard(entry) {
-  if (!entry.attempts.length) return '_No guesses made._';
-  return entry.attempts.map((a) => renderTiles(a.result)).join('\n');
+  return Array.from({ length: MAX_ATTEMPTS }, (_, i) => {
+    const attempt = entry.attempts[i];
+    const tiles = attempt ? attempt.result.map((r) => TILE[r]) : Array(WORD_LENGTH).fill('⬜');
+    const next = entry.status === 'playing' && i === entry.attempts.length ? '  ← next guess' : '';
+    return `\`${i + 1}\`  ${tiles.join(' ')}${next}`;
+  }).join('\n');
 }
 
 const ALPHABET = 'abcdefghijklmnopqrstuvwxyz';

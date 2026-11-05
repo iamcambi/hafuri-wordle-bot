@@ -24,6 +24,8 @@ attempt at it — 6 tries, tracked independently per player.
   confirmed letters in a five-position pattern, letters in the word but in the
   wrong spot, ruled-out letters, and letters not yet tried. Letters never
   disappear behind anonymous colored keyboard squares.
+- The grid has six numbered rows, spaces between tiles, white tiles for unused
+  guesses, and a marker on the next row. Copyable result grids stay compact.
 - Daily puzzles are numbered with the same numbering as the NYT app
   (e.g. "Wordle #1,966")
 - When you finish (win, lose, or give up), the bot **DMs you the answer**

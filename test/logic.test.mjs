@@ -44,9 +44,17 @@ check('first guess continues', out.status === 'continue' && out.entry.attempts.l
 
 // --- full board + keyboard rendering ---
 const board = w.renderBoard(out.entry);
-check('renderBoard shows one row per guess', board.split('\n').length === 1);
+check('board always shows six numbered rows', board.split('\n').length === 6 && board.startsWith('`1`  '));
+check('first guess has five individually spaced tiles', /^`1`  [🟩🟨⬛] [🟩🟨⬛] [🟩🟨⬛] [🟩🟨⬛] [🟩🟨⬛]$/u.test(board.split('\n')[0]));
+check('unused rows are empty tiles', board.split('\n')[5] === '`6`  ⬜ ⬜ ⬜ ⬜ ⬜');
+check('next guess is marked without consuming an attempt', board.split('\n')[1].endsWith('← next guess') && out.entry.attempts.length === 1);
 out = g.guess('alice', 'stone');
-check('board accumulates rows', w.renderBoard(out.entry).split('\n').length === 2);
+check('board preserves previous rows as guesses accumulate', w.renderBoard(out.entry).split('\n')[0] === board.split('\n')[0] && !w.renderBoard(out.entry).split('\n')[1].includes('⬜'));
+check('next marker moves to the third row', w.renderBoard(out.entry).split('\n')[2].endsWith('← next guess'));
+check('grid never prints full guess words', !w.renderBoard(out.entry).includes('CRANE') && !w.renderBoard(out.entry).includes('STONE'));
+const emptyBoard = w.renderBoard({ attempts: [], status: 'playing' });
+check('empty board shows six rows and marks first guess', emptyBoard.split('\n').length === 6 && emptyBoard.split('\n')[0] === '`1`  ⬜ ⬜ ⬜ ⬜ ⬜  ← next guess');
+check('completed board does not invite another guess', !w.renderBoard({ ...out.entry, status: 'won' }).includes('next guess'));
 const kb = w.renderKeyboard([
   { word: 'crane', result: ['correct', 'present', 'absent', 'absent', 'absent'] },
   { word: 'slate', result: ['absent', 'absent', 'present', 'absent', 'correct'] },
@@ -114,6 +122,7 @@ check('hardModeIssues requires green O in position 2', issuesDirect.some((i) => 
 // --- share text ---
 const entry = g.get('alice');
 check('shareGrid rows', w.shareGrid(entry.attempts).split('\n').length === entry.attempts.length);
+check('share grid stays compact without numbering or empty rows', w.shareGrid(entry.attempts).split('\n').every((row) => /^[🟩🟨⬛]{5}$/u.test(row)));
 check('shareScore formats', /^\d\/6\*?$|^X\/6\*?$/.test(w.shareScore(entry)));
 
 // --- stats: NYT streak behavior ---
